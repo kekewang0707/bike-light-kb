@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: bikelight123
       POSTGRES_DB: bikelight_kb
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql
@@ -32,7 +32,7 @@ services:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
       interval: 10s
       timeout: 5s
       retries: 5
