@@ -4,10 +4,11 @@
 图片下载失败不阻塞 — 返回 None，记录日志供事后补下。
 
 特性:
-- 异步并发下载（aiohttp + asyncio.Semaphore）
+- 异步并发下载（httpx + asyncio.Semaphore）
 - 自动创建目录
 - 下载失败不阻塞其他图片
 - 生成下载报告（成功数/失败数）
+- 下载完成后可将图片记录同步写入 product_images 表
 
 Usage::
 
@@ -20,7 +21,9 @@ Usage::
         ...
     ]
     report = await downloader.download_batch(tasks)
-    print(f"成功: {report['success']}, 失败: {report['failed']}")
+    # 将下载成功的图片信息写入数据库
+    synced = downloader.sync_product_images(tasks, report["paths"])
+    print(f"成功: {report['success']}, 失败: {report['failed']}, 入库: {synced}")
 """
 
 import asyncio
@@ -32,6 +35,7 @@ import httpx
 from loguru import logger
 
 from crawler.schemas import ImageTask
+from models import get_session, ProductImage, CRUDBase
 
 
 class ImageDownloader:
@@ -139,6 +143,70 @@ class ImageDownloader:
             f"({report['success'] / max(len(tasks), 1) * 100:.1f}%)"
         )
         return report
+
+    def sync_product_images(
+        self,
+        tasks: List[ImageTask],
+        success_paths: List[str],
+    ) -> int:
+        """下载完成后，将成功下载的图片同步写入 product_images 表。
+
+        按 (product_id, image_url) 去重 — 已存在则更新 local_path，
+        不存在则创建新记录。保证重复采集不会产生重复图片记录。
+
+        参数:
+            tasks:         本次下载的全部 ImageTask 列表
+            success_paths: download_batch() 返回的成功路径列表
+
+        返回:
+            成功写入/更新的记录数
+        """
+        if not tasks or not success_paths:
+            return 0
+
+        image_crud = CRUDBase(ProductImage)
+        success_set = set(success_paths)
+        synced = 0
+
+        session = next(get_session())
+        try:
+            for task in tasks:
+                # 只处理下载成功的
+                if task.local_path not in success_set:
+                    continue
+                # 跳过没有 URL 的（不太可能，但做防御）
+                if not task.url:
+                    continue
+
+                try:
+                    image_crud.upsert_by(
+                        session,
+                        filters={
+                            "product_id": task.product_id,
+                            "image_url": task.url,
+                        },
+                        updates={
+                            "image_type": task.image_type,
+                            "local_path": task.local_path,
+                            "sort_order": task.sort_order,
+                        },
+                    )
+                    synced += 1
+                except Exception as e:
+                    logger.error(
+                        f"图片记录写入失败 "
+                        f"[product_id={task.product_id}, url={task.url[:80]}...]: {e}"
+                    )
+        except Exception as e:
+            session.rollback()
+            logger.error(f"sync_product_images 异常: {e}")
+            raise
+        finally:
+            session.close()
+
+        if synced > 0:
+            logger.info(f"图片记录已入库: {synced} 条")
+        return synced
 
     async def close(self):
         """关闭 HTTP 客户端。"""

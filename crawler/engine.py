@@ -1,4 +1,4 @@
-"""爬虫主调度器 — 串联搜索→详情→评价→图片→入库全流程。
+"""爬虫主调度器 — 串联搜索→详情→评价→入库→图片下载→图片记录同步全流程。
 
 CrawlerEngine 是爬虫模块的顶层入口，负责：
 - 按关键词调用 spider.search() 获取商品列表
@@ -6,6 +6,7 @@ CrawlerEngine 是爬虫模块的顶层入口，负责：
 - 逐个调用 spider.get_reviews() 采集评价
 - 通过 DataPipeline 清洗、校验、去重、入库
 - 收集所有图片下载任务，统一交给 ImageDownloader 执行
+- 下载完成后同步写入 product_images 表
 - 输出 CrawlReport 汇总本次采集结果
 
 支持断点续爬：通过 retry.Checkpoint 记录已处理的 platform_id，
@@ -91,7 +92,8 @@ class CrawlerEngine:
         3. 每个商品 → get_reviews() → 评价数据 (串行，避免风控)
         4. pipeline 清洗→校验→去重→入库
         5. 图片异步下载
-        6. 返回 CrawlReport
+        6. 下载成功的图片记录同步写入 product_images 表
+        7. 返回 CrawlReport
 
         参数:
             keywords:                 搜索关键词列表，如 ["自行车灯", "自行车尾灯"]
@@ -214,6 +216,16 @@ class CrawlerEngine:
                     dl_report = await self.downloader.download_batch(image_tasks)
                     report.images_downloaded = dl_report["success"]
                     report.images_failed = dl_report["failed"]
+
+                    # 将下载成功的图片记录写入 product_images 表
+                    try:
+                        synced = self.downloader.sync_product_images(
+                            image_tasks, dl_report.get("paths", [])
+                        )
+                        logger.info(f"图片记录同步完成: {synced} 条入库")
+                    except Exception as e:
+                        logger.error(f"图片记录同步失败: {e}")
+                        report.errors.append(f"sync_product_images: {e}")
 
             # ---- Phase 4: 清理 ----
             for spider in self.spiders:
