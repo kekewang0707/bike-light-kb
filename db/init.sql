@@ -9,7 +9,7 @@
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS products (
     id              BIGSERIAL PRIMARY KEY,
-    platform        VARCHAR(20)  NOT NULL DEFAULT 'jd',       -- jd / taobao / pdd
+    platform        VARCHAR(20)  NOT NULL DEFAULT 'taobao',   -- taobao / pdd
     platform_id     VARCHAR(100) NOT NULL,                    -- 平台商品ID
     name            VARCHAR(500) NOT NULL,                    -- 商品标题
     brand           VARCHAR(200),                             -- 品牌

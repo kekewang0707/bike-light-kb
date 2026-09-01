@@ -29,3 +29,15 @@ openai>=1.30.0,<2.0.0
 # Utilities
 httpx>=0.27.0
 loguru>=0.7.2
+curl-cffi>=0.7.0                 # mtop 接口伪装 Chrome TLS 指纹（淘宝反爬）
+
+# M4 — 图片分析
+easyocr>=1.7.0                        # OCR 文字提取（PaddleOCR 可选）
+transformers>=4.40.0                   # CLIP 模型
+Pillow>=10.0.0                         # 图片加载（CLIP 预处理）
+scikit-learn>=1.4.0                    # K-Means 聚类
+
+altair~=6.2.2
+beautifulsoup4~=4.15.0
+openpyxl~=3.1.5
+selenium~=4.46.0

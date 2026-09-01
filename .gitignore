@@ -26,3 +26,13 @@ docker-compose.override.yml
 chroma_data/
 .agents/
 .claude/
+
+# 登录态 / 本地数据（含敏感 Cookie，勿提交）
+data/browser_taobao_profile/
+data/cookies/
+data/images/
+data/logs/
+data/checkpoints/
+
+# CodeGraph 代码索引
+.codegraph/

@@ -17,7 +17,7 @@
     session = next(get_session())
 
     # 3. 操作数据
-    product = Product(name="XX车灯", platform="jd", platform_id="123", price=89.0)
+    product = Product(name="XX车灯", platform="taobao", platform_id="123", price=89.0)
     session.add(product)
     session.commit()
 

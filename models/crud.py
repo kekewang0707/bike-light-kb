@@ -25,7 +25,7 @@
     # 存在则更新，不存在则创建
     p = product_crud.upsert_by(
         session,
-        filters={"platform": "jd", "platform_id": "12345"},
+        filters={"platform": "taobao", "platform_id": "12345"},
         updates={"price": 89.0, "sales_volume": 1000},
     )
 
@@ -208,7 +208,7 @@ class CRUDBase(Generic[T]):
             product = crud.get_or_create(
                 session,
                 defaults={"name": "新商品", "price": 99.0},
-                platform="jd", platform_id="12345",
+                platform="taobao", platform_id="12345",
             )
         """
         obj = self.get_by(session, **filters)
@@ -235,10 +235,10 @@ class CRUDBase(Generic[T]):
 
         示例::
 
-            # 京东商品重复采集时自动更新价格和销量
+            # 淘宝商品重复采集时自动更新价格和销量
             product = crud.upsert_by(
                 session,
-                filters={"platform": "jd", "platform_id": "jd-test-001"},
+                filters={"platform": "taobao", "platform_id": "taobao-test-001"},
                 updates={"price": 89.0, "sales_volume": 2500, "crawled_at": now},
             )
         """

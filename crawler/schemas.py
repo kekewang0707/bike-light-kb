@@ -6,7 +6,7 @@
 - 易于序列化：dataclasses.asdict() 直接转 dict
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
@@ -24,8 +24,8 @@ class ProductBrief:
     这一步速度快（API ~200ms），是后续详情抓取的前置步骤。
     """
 
-    platform: str               # jd / taobao / pdd
-    platform_id: str            # 平台商品ID（京东为 skuId）
+    platform: str               # taobao / pdd
+    platform_id: str            # 平台侧商品唯一ID
     name: str                   # 商品标题（原始文案）
     price: Decimal              # 当前售价（元）
     shop_name: str              # 店铺名称
@@ -122,25 +122,3 @@ class CrawlReport:
     duration_seconds: float = 0.0           # 总耗时（秒）
     started_at: Optional[datetime] = None   # 开始时间
     finished_at: Optional[datetime] = None  # 结束时间
-
-    def to_dict(self) -> dict:
-        """转为字典，方便序列化和日志记录。"""
-        return asdict(self)
-
-    @property
-    def success_rate(self) -> float:
-        """图片下载成功率。"""
-        total = self.images_downloaded + self.images_failed
-        return self.images_downloaded / total if total > 0 else 1.0
-
-
-# ============================================================================
-# 价格历史
-# ============================================================================
-
-@dataclass
-class PricePoint:
-    """单个价格数据点 — 用于 get_price_history() 的返回值。"""
-
-    price: Decimal
-    date: datetime

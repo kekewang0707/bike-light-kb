@@ -22,7 +22,6 @@ from decimal import Decimal
 from typing import List, Optional, Tuple
 
 from loguru import logger
-from sqlalchemy.orm import Session
 
 from models import (
     get_session,
@@ -43,7 +42,7 @@ def _utcnow():
 class DataValidator:
     """数据校验器 — 入库前执行。"""
 
-    VALID_PLATFORMS = {"jd", "taobao", "pdd"}
+    VALID_PLATFORMS = {"taobao", "pdd"}
 
     @staticmethod
     def validate_product(data: dict) -> Tuple[bool, str]:
@@ -151,7 +150,7 @@ class DataPipeline:
                 "sales_volume": brief.sales_volume,
                 "comment_count": brief.comment_count,
                 "good_rate": brief.good_rate,
-                "product_url": brief.product_url or self._build_jd_url(brief.platform_id),
+                "product_url": brief.product_url,
                 "crawled_at": _utcnow(),
             }
 
@@ -357,28 +356,10 @@ class DataPipeline:
         self._image_tasks.clear()
         return tasks
 
-    def add_image_task(self, task: ImageTask):
-        """手动添加一个图片下载任务。"""
-        self._image_tasks.append(task)
-
     # ==================================================================
     # 统计
     # ==================================================================
 
-    @property
-    def stats(self) -> dict:
-        return dict(self._stats)
-
     def reset_stats(self):
         self._stats = {"new": 0, "updated": 0, "skipped": 0}
 
-    # ==================================================================
-    # 内部方法
-    # ==================================================================
-
-    @staticmethod
-    def _build_jd_url(platform_id: str) -> str:
-        """从 platform_id 构建京东商品链接。"""
-        if platform_id.isdigit():
-            return f"https://item.jd.com/{platform_id}.html"
-        return ""

@@ -26,11 +26,9 @@ Usage::
 import asyncio
 import json
 import random
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Any, Set
-from functools import wraps
 
 from loguru import logger
 
@@ -99,34 +97,6 @@ async def with_retry(
             await asyncio.sleep(delay)
 
 
-def retry(max_retries: int = 3, base_delay: float = 2.0):
-    """同步函数的重试装饰器。"""
-    def decorator(fn: Callable):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            last_exception = None
-            for attempt in range(max_retries + 1):
-                try:
-                    result = fn(*args, **kwargs)
-                    if attempt > 0:
-                        logger.info(f"{fn.__name__} 第 {attempt} 次重试成功")
-                    return result
-                except Exception as e:
-                    last_exception = e
-                    if attempt >= max_retries:
-                        raise
-                    delay = base_delay * (2 ** attempt)
-                    delay *= random.uniform(0.5, 1.5)
-                    logger.warning(
-                        f"{fn.__name__} 重试 {attempt + 1}/{max_retries}: {e}，"
-                        f"{delay:.1f}s 后重试"
-                    )
-                    time.sleep(delay)
-            raise last_exception
-        return wrapper
-    return decorator
-
-
 # ============================================================================
 # 断点续爬
 # ============================================================================
@@ -141,7 +111,7 @@ class Checkpoint:
 
     Usage::
 
-        cp = Checkpoint("task_crawl_jd_20260709")
+        cp = Checkpoint("task_crawl_taobao_20260709")
         for product in products:
             if cp.is_done(product.platform_id):
                 continue

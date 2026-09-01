@@ -29,12 +29,12 @@ Usage::
 import asyncio
 import time
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List
 
 from loguru import logger
 
 from crawler.base import BaseSpider
-from crawler.jd_spider import JDSpider
+from crawler.taobao_spider import TaobaoSpider
 from crawler.pipeline import DataPipeline
 from crawler.downloader import ImageDownloader
 from crawler.retry import Checkpoint, with_retry
@@ -49,7 +49,7 @@ class CrawlerEngine:
     """爬虫主调度器 — 管理多平台爬虫、数据管线、图片下载。
 
     参数:
-        spiders:       平台爬虫列表，默认仅 [JDSpider()]
+        spiders:       平台爬虫列表，默认仅 [TaobaoSpider()]
         pipeline:      数据处理管线
         downloader:    图片下载器
         concurrency:   同时处理的商品数（详情抓取并发度）
@@ -64,7 +64,7 @@ class CrawlerEngine:
         concurrency: int = 3,
         enable_checkpoint: bool = True,
     ):
-        self.spiders = spiders or [JDSpider(use_cdp=True, use_mobile_api=True)]
+        self.spiders = spiders or [TaobaoSpider()]
         self.pipeline = pipeline or DataPipeline()
         self.downloader = downloader or ImageDownloader(concurrency=5)
         self.concurrency = concurrency
@@ -163,6 +163,12 @@ class CrawlerEngine:
 
                 logger.info(f"[{i + 1}/{len(pending)}] 处理: {brief.name[:50]}...")
 
+                # 商品间延迟（降低风控风险）
+                if i > 0:
+                    delay = 15 + (i % 5) * 5  # 15~35 秒随机梯度
+                    logger.debug(f"等待 {delay}s 后处理下一个商品...")
+                    await asyncio.sleep(delay)
+
                 product_id = None
 
                 # 详情
@@ -252,42 +258,6 @@ class CrawlerEngine:
         )
 
         return report
-
-    # ==================================================================
-    # 定时任务入口
-    # ==================================================================
-
-    async def run_scheduled(self) -> CrawlReport:
-        """定时任务入口 — 从 config/settings.py 读取参数。
-
-        供 M8 调度器调用的标准化接口。
-        """
-        from config.settings import settings
-
-        return await self.run(
-            keywords=["自行车灯", "自行车前灯", "自行车尾灯"],
-            max_products_per_keyword=settings.crawler_max_products,
-        )
-
-    # ==================================================================
-    # 断点恢复
-    # ==================================================================
-
-    async def resume(self, checkpoint_id: str) -> CrawlReport:
-        """从指定检查点恢复未完成的爬虫任务。
-
-        参数:
-            checkpoint_id: 检查点 ID（即上次 run() 时使用的 task_id）
-        """
-        checkpoint = Checkpoint(checkpoint_id)
-        done_count = checkpoint.done_count
-        logger.info(f"从检查点恢复: 已处理 {done_count} 个，将跳过")
-
-        # 恢复执行（复用 run 逻辑）
-        return await self.run(
-            keywords=["自行车灯"],  # 恢复时需重新搜索
-            max_products_per_keyword=200,  # 扩大搜索范围以覆盖遗漏的商品
-        )
 
     # ==================================================================
     # 内部方法

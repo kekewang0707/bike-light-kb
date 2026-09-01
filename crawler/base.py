@@ -19,7 +19,7 @@ Usage::
 from abc import ABC, abstractmethod
 from typing import List
 
-from crawler.schemas import ProductBrief, ProductDetail, ReviewData, PricePoint
+from crawler.schemas import ProductBrief, ProductDetail, ReviewData
 
 
 class BaseSpider(ABC):
@@ -93,21 +93,9 @@ class BaseSpider(ABC):
         返回:
             ReviewData 列表
 
-        实现要求（京东）:
+        实现要求:
         - 优先使用 Playwright XHR 拦截方式（绕过 API 签名限制）
         - 降级方案：开放平台 API / HTML 解析
-        """
-        ...
-
-    @abstractmethod
-    async def get_price_history(self, product: ProductBrief) -> List[PricePoint]:
-        """获取商品历史价格。
-
-        参数:
-            product: 商品简要信息
-
-        返回:
-            PricePoint 列表。如果平台不支持或接口不可用，返回空列表。
         """
         ...
 

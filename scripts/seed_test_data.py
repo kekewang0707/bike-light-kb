@@ -23,7 +23,6 @@ from models import (
     ProductImage,
     ProductSKU,
     Review,
-    ReviewImage,
     PriceHistory,
     HotRanking,
     ReviewAnalysis,
@@ -42,14 +41,14 @@ def seed(session):
     # 商品 1 — 热销爆款
     # ------------------------------------------------------------------
     p1 = Product(
-        platform="jd",
-        platform_id="jd-test-001",
+        platform="taobao",
+        platform_id="taobao-test-001",
         name="800流明 USB充电自行车灯 夜骑装备 IPX6防水 超长续航",
         brand="BrightRide",
         shop_name="BrightRide旗舰店",
         category="自行车前灯",
-        product_url="https://item.jd.com/jd-test-001.html",
-        main_image_url="https://img.example.com/jd-test-001-main.jpg",
+        product_url="https://item.taobao.com/taobao-test-001.html",
+        main_image_url="https://img.example.com/taobao-test-001-main.jpg",
         price=Decimal("89.00"),
         original_price=Decimal("129.00"),
         sales_volume=2345,
@@ -69,14 +68,14 @@ def seed(session):
 
     # 商品 2 — 中端竞品
     p2 = Product(
-        platform="jd",
-        platform_id="jd-test-002",
+        platform="taobao",
+        platform_id="taobao-test-002",
         name="自行车灯前灯 强光远射 骑行手电筒 智能感应 送支架",
         brand="NightHawk",
         shop_name="NightHawk户外专营店",
         category="自行车前灯",
-        product_url="https://item.jd.com/jd-test-002.html",
-        main_image_url="https://img.example.com/jd-test-002-main.jpg",
+        product_url="https://item.taobao.com/taobao-test-002.html",
+        main_image_url="https://img.example.com/taobao-test-002-main.jpg",
         price=Decimal("59.00"),
         original_price=Decimal("79.00"),
         sales_volume=3120,
@@ -95,14 +94,14 @@ def seed(session):
 
     # 商品 3 — 智能高端款
     p3 = Product(
-        platform="jd",
-        platform_id="jd-test-003",
+        platform="taobao",
+        platform_id="taobao-test-003",
         name="智能感应自行车灯 远近光自动切换 刹车警示灯 铝合金外壳",
         brand="SmartBike",
         shop_name="SmartBike官方店",
         category="自行车前灯",
-        product_url="https://item.jd.com/jd-test-003.html",
-        main_image_url="https://img.example.com/jd-test-003-main.jpg",
+        product_url="https://item.taobao.com/taobao-test-003.html",
+        main_image_url="https://img.example.com/taobao-test-003-main.jpg",
         price=Decimal("159.00"),
         original_price=Decimal("199.00"),
         sales_volume=876,
@@ -123,14 +122,14 @@ def seed(session):
 
     # 商品 4 — 低价走量款
     p4 = Product(
-        platform="jd",
-        platform_id="jd-test-004",
+        platform="taobao",
+        platform_id="taobao-test-004",
         name="自行车灯 LED强光 骑行灯 户外照明 防水车灯",
         brand="BasicGear",
         shop_name="骑迹户外小店",
         category="自行车前灯",
-        product_url="https://item.jd.com/jd-test-004.html",
-        main_image_url="https://img.example.com/jd-test-004-main.jpg",
+        product_url="https://item.taobao.com/taobao-test-004.html",
+        main_image_url="https://img.example.com/taobao-test-004-main.jpg",
         price=Decimal("29.90"),
         original_price=Decimal("39.90"),
         sales_volume=5600,
@@ -149,14 +148,14 @@ def seed(session):
 
     # 商品 5 — 尾灯品类
     p5 = Product(
-        platform="jd",
-        platform_id="jd-test-005",
+        platform="taobao",
+        platform_id="taobao-test-005",
         name="自行车尾灯 USB充电 智能刹车感应 夜间警示 七彩变色",
         brand="BrightRide",
         shop_name="BrightRide旗舰店",
         category="自行车尾灯",
-        product_url="https://item.jd.com/jd-test-005.html",
-        main_image_url="https://img.example.com/jd-test-005-main.jpg",
+        product_url="https://item.taobao.com/taobao-test-005.html",
+        main_image_url="https://img.example.com/taobao-test-005-main.jpg",
         price=Decimal("49.00"),
         original_price=Decimal("69.00"),
         sales_volume=1890,

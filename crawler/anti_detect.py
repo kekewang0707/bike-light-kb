@@ -1,143 +1,24 @@
-"""京东反爬对抗 — 7 层防护体系。
+"""反爬对抗 — 启动参数、指纹注入、环境一致性、UA 池、行为拟人。
 
-2025 年的京东反爬已经从简单的 UA 检测进化到四层防御体系。
-本模块提供从启动参数到降级恢复的完整对抗方案。
-
-核心原则:
-- 没有银弹！反爬是持续的猫鼠游戏，需要定期更新
-- 有头模式优先：京东对 headless 检测极严，headless 基本不可用
-- 最有效方案：CDP 连接本地 Chrome（真实浏览器环境，无 webdriver 特征）
-
-7 层防护:
-  第1层: 启动参数 — 去除 AutomationControlled 等自动化标志
-  第2层: 指纹注入 — addInitScript 在页面 JS 执行前注入反检测脚本
-  第3层: 环境一致性 — locale/时区/viewport/UA/Client Hints 全部匹配
-  第4层: UA 池 — 10+ 真实移动端和桌面端 UA，定期轮换
-  第5层: 行为拟人 — 贝塞尔鼠标轨迹、正态分布延迟、拟人滚动
-  第6层: 节奏控制 — 自适应限速、避开凌晨时段
-  第7层: 降级恢复 — 检测验证码→暂停→切IP→通知
-
-Usage::
-
-    from crawler.anti_detect import AntiDetect, CDPConnection
-
-    # CDP 连接（首选）
-    browser = await CDPConnection.connect_to_local_chrome()
-
-    # 或 Playwright 直连（备选）
-    browser = await playwright.chromium.launch(
-        headless=False,
-        args=AntiDetect.get_launch_args(),
-    )
-    context = AntiDetect.create_context(browser)
-    page = await context.new_page()
-    await AntiDetect.inject_stealth_scripts(page)
+为 Playwright 浏览器提供反自动化检测能力：
+- get_launch_args: 去除 AutomationControlled 等自动化标志
+- inject_stealth_scripts: 在页面 JS 执行前注入反检测脚本
+- create_context: 统一 locale/时区/viewport/UA 等环境参数
+- random_ua: 10+ 真实移动端/桌面端 UA 池
+- human_delay / human_scroll: 拟人化延迟与滚动
 """
 
 import asyncio
 import random
-import time
-from datetime import datetime
-from pathlib import Path
 from typing import List, Optional
 
-import httpx
-from loguru import logger
-
-# Playwright 是可选依赖，运行时检查
-try:
-    from playwright.async_api import Browser, BrowserContext, Page, async_playwright
-    HAS_PLAYWRIGHT = True
-except ImportError:
-    HAS_PLAYWRIGHT = False
-
 
 # ============================================================================
-# CDP 连接管理 — 对抗京东的最有效方案
-# ============================================================================
-
-class CDPConnection:
-    """通过 Chrome DevTools Protocol 连接本地真实浏览器。
-
-    这是目前对抗京东最有效的方式：
-    - 真实浏览器环境，无 webdriver 特征（navigator.webdriver 天生为 undefined）
-    - 复用日常登录的京东 Cookie（无需每次重新登录）
-    - Canvas/WebGL 指纹是真实硬件渲染（非 SwiftShader 软件模拟）
-    - 绕过约 90% 的自动化检测
-
-    启动本地 Chrome（macOS）::
-
-        /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome \\
-          --remote-debugging-port=9222 \\
-          --user-data-dir=/tmp/chrome-jd-profile
-
-    然后在代码中连接::
-
-        browser = await CDPConnection.connect_to_local_chrome()
-    """
-
-    DEFAULT_CDP_URL = "http://localhost:9222"
-
-    @staticmethod
-    async def connect_to_local_chrome(cdp_url: str = None) -> "Browser":
-        """连接到本地 Chrome 的 CDP 端口。
-
-        参数:
-            cdp_url: CDP 调试端口地址，默认 http://localhost:9222
-
-        返回:
-            Playwright Browser 实例（通过 CDP 连接）
-
-        异常:
-            RuntimeError: 如果 CDP 端口不可用
-            ImportError: 如果未安装 playwright
-        """
-        if not HAS_PLAYWRIGHT:
-            raise ImportError("请安装 playwright: pip install playwright && playwright install")
-
-        url = cdp_url or CDPConnection.DEFAULT_CDP_URL
-        available, msg = await CDPConnection.is_available(url)
-        if not available:
-            raise RuntimeError(
-                f"CDP 端口不可用: {msg}\n"
-                f"请先启动本地 Chrome:\n"
-                f"  /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome \\\n"
-                f"    --remote-debugging-port=9222 \\\n"
-                f"    --user-data-dir=/tmp/chrome-jd-profile"
-            )
-
-        logger.info(f"通过 CDP 连接到本地 Chrome: {url}")
-        playwright = await async_playwright().start()
-        browser = await playwright.chromium.connect_over_cdp(url)
-        return browser
-
-    @staticmethod
-    async def is_available(cdp_url: str = None) -> tuple[bool, str]:
-        """检查 CDP 端口是否可用。
-
-        返回:
-            (可用标志, 消息)
-        """
-        url = cdp_url or CDPConnection.DEFAULT_CDP_URL
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(f"{url}/json/version", timeout=3.0)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    return True, f"Chrome {data.get('Browser', 'unknown')}"
-                return False, f"HTTP {resp.status_code}"
-        except httpx.ConnectError:
-            return False, f"无法连接到 {url}，Chrome 可能未启动"
-        except Exception as e:
-            return False, str(e)
-
-
-# ============================================================================
-# 7 层反爬对抗
+# 反爬对抗
 # ============================================================================
 
 class AntiDetect:
-    """京东反爬对抗 — 7 层防护体系。"""
+    """反爬对抗 — 启动参数、指纹注入、环境一致性、UA 池、行为拟人。"""
 
     # ================================================================
     # 第1层：启动参数
@@ -310,7 +191,7 @@ class AntiDetect:
     # ================================================================
 
     @staticmethod
-    def create_context(
+    async def create_context(
         browser: "Browser",
         proxy: Optional[dict] = None,
         use_mobile: bool = False,
@@ -359,13 +240,13 @@ class AntiDetect:
         if proxy:
             context_options["proxy"] = proxy
 
-        # 设置额外 HTTP 头以增强一致性
-        context = browser.new_context(**context_options)
-        context.set_extra_http_headers({
+        # Playwright 1.45+: HTTP headers 作为 new_context 参数传入
+        context_options["extra_http_headers"] = {
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Encoding": "gzip, deflate, br",
-        })
+        }
+        context = await browser.new_context(**context_options)
         return context
 
     # ================================================================
@@ -450,205 +331,3 @@ class AntiDetect:
         if random.random() < 0.3:
             await page.mouse.wheel(0, -random.randint(50, 150))
             await asyncio.sleep(random.uniform(0.2, 0.5))
-
-    @staticmethod
-    async def human_mouse_move(
-        page: "Page",
-        target_x: float,
-        target_y: float,
-        steps: int = None,
-    ):
-        """贝塞尔曲线鼠标移动 — 真实用户无法画出完美直线。
-
-        参数:
-            page: Playwright Page
-            target_x, target_y: 目标坐标
-            steps: 移动步数，None 则随机 8-15 步
-        """
-        if steps is None:
-            steps = random.randint(8, 15)
-
-        # 获取当前鼠标位置（估计值）
-        start_x = random.uniform(target_x - 200, target_x - 50)
-        start_y = random.uniform(target_y - 100, target_y + 100)
-
-        # 控制点加入随机偏移
-        cp_x = (start_x + target_x) / 2 + random.uniform(-30, 30)
-        cp_y = (start_y + target_y) / 2 + random.uniform(-30, 30)
-
-        for i in range(steps + 1):
-            t = i / steps
-            # 二次贝塞尔曲线
-            x = (1 - t) ** 2 * start_x + 2 * (1 - t) * t * cp_x + t ** 2 * target_x
-            y = (1 - t) ** 2 * start_y + 2 * (1 - t) * t * cp_y + t ** 2 * target_y
-            await page.mouse.move(x, y)
-            await asyncio.sleep(random.uniform(0.001, 0.005))
-
-    @staticmethod
-    async def human_type(page: "Page", selector: str, text: str):
-        """逐字符输入 — 每个字符间隔随机 50-150ms。
-
-        为什么不用 page.fill()？
-        - fill() 是瞬间填充，不会触发键盘事件
-        - 京东的搜索框会监听输入事件做联想推荐
-        - 逐字符输入更接近真人行为
-        """
-        await page.click(selector)
-        await AntiDetect.human_delay(0.3, 0.8)
-        for char in text:
-            await page.keyboard.type(char, delay=random.randint(50, 150))
-
-    @staticmethod
-    async def random_mouse_moves(page: "Page", count: int = 3):
-        """在页面上随机移动鼠标几次 — 模拟浏览行为。"""
-        vp = page.viewport_size
-        if not vp:
-            return
-        for _ in range(count):
-            x = random.randint(100, vp["width"] - 100)
-            y = random.randint(100, vp["height"] - 100)
-            await AntiDetect.human_mouse_move(page, x, y)
-            await asyncio.sleep(random.uniform(0.5, 1.5))
-
-    # ================================================================
-    # 第6层：节奏控制
-    # ================================================================
-
-    @staticmethod
-    def should_throttle(
-        request_count: int,
-        time_window_seconds: float,
-        max_per_minute: int = 5,
-    ) -> bool:
-        """自适应限速检查。
-
-        返回 True 表示当前请求频率过高，应该暂停等待。
-        每小时不超过 50 页详情是一个经验安全值。
-        """
-        if time_window_seconds < 60:
-            return False  # 窗口太短，不判断
-        rate_per_minute = request_count / (time_window_seconds / 60)
-        return rate_per_minute > max_per_minute
-
-    @staticmethod
-    def is_off_hours() -> bool:
-        """凌晨 2-6 点降低采集频率。
-
-        真实用户在这个时段不太活跃，高频请求更容易触发风控。
-        定时任务尽量安排在白天执行。
-        """
-        hour = datetime.now().hour
-        return 2 <= hour < 6
-
-    @staticmethod
-    def get_safe_delay() -> float:
-        """根据当前时段返回推荐的安全延迟。
-
-        凌晨时段：更长的延迟（5-15s）
-        白天时段：正常延迟（2-8s）
-        """
-        if AntiDetect.is_off_hours():
-            return random.gauss(10.0, 2.5)
-        return random.gauss(5.0, 1.5)
-
-    # ================================================================
-    # 第7层：降级恢复
-    # ================================================================
-
-    CAPTCHA_INDICATORS = [
-        "验证码", "captcha", "verify", "滑块", "请按住滑块",
-        "请完成安全验证", "geetest", "#captcha", ".captcha",
-        "login.jd.com", "passport.jd.com",
-    ]
-
-    @staticmethod
-    async def detect_captcha(page: "Page") -> bool:
-        """检测当前页面是否触发了验证码。
-
-        京东常见验证码特征：
-        - 滑块验证码（geetest）
-        - 图形验证码
-        - 登录重定向（passport.jd.com）
-
-        返回:
-            True 表示检测到验证码，应立即暂停采集
-        """
-        try:
-            url = page.url.lower()
-            for indicator in ["login.jd.com", "passport.jd.com"]:
-                if indicator in url:
-                    logger.warning(f"检测到登录重定向: {page.url}")
-                    return True
-
-            content = await page.content()
-            content_lower = content.lower()
-
-            for indicator in AntiDetect.CAPTCHA_INDICATORS:
-                if indicator.lower() in content_lower:
-                    logger.warning(f"检测到验证码特征: {indicator}")
-                    # 截图保存现场
-                    screenshot_dir = Path("data/logs/captcha")
-                    screenshot_dir.mkdir(parents=True, exist_ok=True)
-                    screenshot_path = screenshot_dir / f"captcha_{int(time.time())}.png"
-                    await page.screenshot(path=str(screenshot_path))
-                    logger.info(f"验证码截图已保存: {screenshot_path}")
-                    return True
-        except Exception as e:
-            logger.error(f"验证码检测异常: {e}")
-
-        return False
-
-    @staticmethod
-    def get_cooldown_seconds() -> int:
-        """验证码触发后的冷却时间（秒）。
-
-        首次触发: 30 分钟
-        之后每次增加 10 分钟，上限 2 小时
-        """
-        return 30 * 60  # 基础 30 分钟冷却
-
-
-# ============================================================================
-# 登录辅助
-# ============================================================================
-
-class LoginHelper:
-    """京东登录辅助 — 当 Cookie 过期时引导用户手动扫码登录。"""
-
-    @staticmethod
-    async def wait_for_manual_login(page: "Page", timeout_seconds: int = 120):
-        """打开京东登录页，等待用户手动扫码登录。
-
-        参数:
-            page: Playwright Page
-            timeout_seconds: 最大等待时间
-
-        返回:
-            True: 登录成功
-            False: 超时
-        """
-        logger.info("需要登录京东，请在浏览器中扫码...")
-
-        await page.goto("https://passport.jd.com/new/login.aspx", wait_until="domcontentloaded")
-        await AntiDetect.human_delay(2, 4)
-
-        try:
-            # 点击"账号登录"切换到扫码模式
-            login_btn = page.locator('a:has-text("账号登录"), .login-tab-r:has-text("扫码登录")')
-            if await login_btn.count() > 0:
-                await login_btn.first.click()
-                await AntiDetect.human_delay(1, 2)
-        except Exception:
-            pass
-
-        # 等待登录成功（URL 不再是 passport.jd.com）
-        start = time.time()
-        while time.time() - start < timeout_seconds:
-            url = page.url
-            if "passport.jd.com" not in url and "login.jd.com" not in url:
-                logger.info("登录成功！")
-                return True
-            await asyncio.sleep(2)
-
-        logger.error(f"登录超时（{timeout_seconds}s）")
-        return False

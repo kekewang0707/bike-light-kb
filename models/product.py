@@ -77,12 +77,12 @@ class Product(Base):
 
     # ---- 平台标识 ----
     platform = Column(
-        String(20), nullable=False, default="jd",
-        comment="电商平台: jd(京东) / taobao(淘宝) / pdd(拼多多)",
+        String(20), nullable=False, default="taobao",
+        comment="电商平台: taobao(淘宝) / pdd(拼多多)",
     )
     platform_id = Column(
         String(100), nullable=False,
-        comment="平台侧的商品唯一ID，如京东的 skuId",
+        comment="平台侧的商品唯一ID，如淘宝的 itemId",
     )
 
     # ---- 基础信息 ----

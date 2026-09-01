@@ -18,14 +18,14 @@ class Settings(BaseSettings):
     # LLM / DeepSeek
     deepseek_api_key: str = ""
 
-    # Crawler
-    crawler_headless: bool = False
-    crawler_max_products: int = 200
-    crawler_request_delay: float = 2.0
+    # 多模态 VL (Qwen-VL via DashScope)
+    dashscope_api_key: str = ""
 
     class Config:
         env_prefix = "BKL_"
         env_file = ".env"
+        # 容忍 .env 里未被定义的 BKL_* 变量（如旧的 crawler 配置），避免实例化失败
+        extra = "allow"
 
 
 settings = Settings()

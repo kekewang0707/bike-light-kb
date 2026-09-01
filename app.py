@@ -2,8 +2,9 @@
 
 import streamlit as st
 import psycopg2
-import os
 from datetime import datetime
+
+from config.settings import settings
 
 # ---------------------------------------------------------------------------
 # 页面配置
@@ -17,12 +18,14 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 # 数据库连接
 # ---------------------------------------------------------------------------
+# 统一从 config/settings.py 读取，默认端口 5433 与 docker-compose 映射一致。
+# 配置项均可通过环境变量 BKL_* 覆盖（见 config/settings.py）。
 DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "localhost"),
-    "port": os.getenv("DB_PORT", "5432"),
-    "dbname": os.getenv("DB_NAME", "bikelight_kb"),
-    "user": os.getenv("DB_USER", "bikelight"),
-    "password": os.getenv("DB_PASSWORD", "bikelight123"),
+    "host": settings.db_host,
+    "port": settings.db_port,
+    "dbname": settings.db_name,
+    "user": settings.db_user,
+    "password": settings.db_password,
 }
 
 
@@ -53,7 +56,9 @@ def check_db_health() -> dict:
     try:
         import chromadb
 
-        client = chromadb.HttpClient(host="localhost", port=8000)
+        client = chromadb.HttpClient(
+            host=settings.chroma_host, port=settings.chroma_port
+        )
         client.heartbeat()
         status["chromadb"]["healthy"] = True
         status["chromadb"]["message"] = "连接正常"

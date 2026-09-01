@@ -27,7 +27,6 @@ Usage::
 """
 
 import asyncio
-import os
 from pathlib import Path
 from typing import List, Optional
 
@@ -72,33 +71,6 @@ class ImageDownloader:
     # ------------------------------------------------------------------
     # 公共方法
     # ------------------------------------------------------------------
-
-    async def download(
-        self,
-        url: str,
-        product_id: int,
-        image_type: str,
-        sort_order: int = 0,
-    ) -> Optional[str]:
-        """下载单张图片，返回本地路径。失败返回 None。
-
-        参数:
-            url:         远程图片 URL
-            product_id:  商品 ID
-            image_type:  main / detail / review
-            sort_order:  排序序号
-
-        返回:
-            本地相对路径，如 "1/main_1.jpg"。失败返回 None。
-        """
-        task = ImageTask(
-            url=url,
-            product_id=product_id,
-            image_type=image_type,
-            local_path=self._build_local_path(product_id, image_type, sort_order),
-            sort_order=sort_order,
-        )
-        return await self._download_one(task)
 
     async def download_batch(self, tasks: List[ImageTask]) -> dict:
         """批量下载图片并返回统计报告。
@@ -208,12 +180,6 @@ class ImageDownloader:
             logger.info(f"图片记录已入库: {synced} 条")
         return synced
 
-    async def close(self):
-        """关闭 HTTP 客户端。"""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
-
     # ------------------------------------------------------------------
     # 内部方法
     # ------------------------------------------------------------------
@@ -231,7 +197,7 @@ class ImageDownloader:
                                   "Chrome/122.0.0.0 Safari/537.36",
                     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
                     "Accept-Language": "zh-CN,zh;q=0.9",
-                    "Referer": "https://www.jd.com/",
+                    "Referer": "https://www.taobao.com/",
                 },
             )
         return self._client
