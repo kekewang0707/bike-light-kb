@@ -436,6 +436,13 @@ class CookieManager:
         with open(self.cookie_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2, default=str)
 
+        # 安全：Cookie 等同账号免密登录凭据，限制为仅属主可读写（0600）
+        try:
+            os.chmod(self.cookie_file, 0o600)
+            os.chmod(self.cookie_dir, 0o700)
+        except OSError as e:
+            logger.warning(f"无法设置 Cookie 文件权限（{self.cookie_file}）: {e}")
+
         logger.info(f"已保存 {len(cookies)} 个 {self.platform} Cookie → {self.cookie_file}")
 
     def load(self) -> Optional[List[dict]]:

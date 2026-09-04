@@ -73,7 +73,11 @@ def cmd_search(args: argparse.Namespace) -> int:
     if items:
         print(f"返回条目数: {len(items)}")
         for it in items:
-            print(f"  - {str(it['title'])[:40]}  ¥{it['price']}  销量{it['sales']}  店:{it['shop']}")
+            print(
+                f"  - {str(it['title'])[:40]}  ¥{it['price']}  销量{it['sales']}  "
+                f"店:{it['shop']}  评价{it['comment_count'] or '—'}  "
+                f"图:{it['main_image_url'] or '—'}"
+            )
     else:
         import json as _json
         print("未解析到商品列表，原始 data:", _json.dumps(data.get("data", {}), ensure_ascii=False)[:800])

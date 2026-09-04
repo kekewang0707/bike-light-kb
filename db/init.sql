@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS products (
     comment_count   INTEGER DEFAULT 0,                        -- 评价总数
     good_rate       DECIMAL(5, 2),                            -- 好评率(%)
     specs           JSONB,                                    -- 规格参数
+    marketing       JSONB,                                    -- 营销/榜单附加信息(从specs剥离)
     crawled_at      TIMESTAMPTZ,                              -- 最后采集时间
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -64,6 +65,7 @@ CREATE TABLE IF NOT EXISTS reviews (
     rating              INTEGER NOT NULL,                     -- 1-5 星
     content             TEXT,                                 -- 评价原文
     user_name           VARCHAR(200),
+    user_name_hash      VARCHAR(64),                          -- 用户昵称盐值SHA-256哈希(明文已丢弃)
     user_level          VARCHAR(50),                          -- plus会员 / 普通用户
     buy_date            TIMESTAMPTZ,
     review_date         TIMESTAMPTZ,

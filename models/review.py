@@ -70,7 +70,14 @@ class Review(Base):
     )
 
     # ---- 用户信息 ----
-    user_name = Column(String(200), comment="用户昵称（脱敏后）")
+    user_name = Column(
+        String(200),
+        comment="用户昵称（已脱敏/留空；明文在采集时即丢弃，仅保留哈希用于去重）",
+    )
+    user_name_hash = Column(
+        String(64),
+        comment="用户昵称的盐值SHA-256哈希（明文已丢弃，仅用于同用户去重）",
+    )
     user_level = Column(
         String(50),
         comment="用户等级，如 plus会员 / 普通用户 / PLUS会员",

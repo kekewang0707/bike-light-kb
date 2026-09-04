@@ -75,12 +75,19 @@ def _split_token(cookie_value: str) -> str:
     return cookie_value.split("_", 1)[0].split(",", 1)[0].strip()
 
 
-def _parse_token_from_set_cookie(set_cookie: str) -> str:
-    """从 Set-Cookie 头解析 _m_h5_tk 的 token 部分。"""
+def _extract_h5_tk_value(set_cookie: str) -> str:
+    """从 Set-Cookie 头取出 _m_h5_tk 的**完整取值**（{token}_{ts}）。
+
+    这里返回完整值而非 token 片段：服务端校验时可能用到时间戳部分，
+    只取 token 会改变原本的会话语义。签名时才用 ``_split_token()`` 截取。
+
+    正则停在第一个 ``;`` 或 ``,`` 之前，因此不受
+    ``Expires=Wed, 09 Jun 2021 ...`` 这类含逗号属性的干扰。
+    """
     if not set_cookie:
         return ""
     m = re.search(r"_m_h5_tk=([^;,]+)", set_cookie)
-    return _split_token(m.group(1)) if m else ""
+    return m.group(1).strip() if m else ""
 
 
 # ---------------------------------------------------------------------------
@@ -127,18 +134,22 @@ class MtopClient:
         return _split_token(value)
 
     def _refresh_from_headers(self, headers) -> None:
-        """把响应 Set-Cookie 里的 _m_h5_tk 写回会话，供下一次签名使用。"""
-        set_cookie = ""
+        """把响应 Set-Cookie 里的 _m_h5_tk 写回会话，供下一次签名使用。
+
+        注意：不能直接按 ``,`` 切分整串 —— Set-Cookie 的属性值里本身就含逗号
+        （如 ``Expires=Wed, 09 Jun 2021 10:18:14 GMT``）。
+        这里用 ``http.cookies`` 的标准解析：它只把「逗号 + 空格 + name=」视为
+        多条 Cookie 的分界，能正确处理 Expires 中的逗号。
+        """
         for k, v in headers.items():
-            if k.lower() == "set-cookie":
-                set_cookie = (set_cookie + "," + v) if set_cookie else v
-        if set_cookie:
-            for part in set_cookie.split(","):
-                part = part.strip()
-                if part.startswith("_m_h5_tk="):
-                    value = part.split("=", 1)[1].split(";")[0].strip()
-                    self.session.cookies.set("_m_h5_tk", value, domain=".taobao.com")
-                    break
+            if k.lower() != "set-cookie":
+                continue
+            # 交给专用解析器：Set-Cookie 属性值里含逗号（Expires=Wed, 09 Jun ...），
+            # 手动 split(",") 会把 token 截断
+            value = _extract_h5_tk_value(v)
+            if value:
+                self.session.cookies.set("_m_h5_tk", value, domain=".taobao.com")
+                return
 
     # ------------------------------------------------------------------
     # 调用
@@ -247,7 +258,11 @@ async def search(
 
 
 def parse_items(j: Dict[str, Any], limit: int = 20) -> List[Dict[str, Any]]:
-    """从搜索响应中解析商品条目（data.itemsArray 为实际数据）。"""
+    """从搜索响应中解析商品条目（data.itemsArray 为实际数据）。
+
+    返回每个商品的归一化字典，字段与 crawler/taobao_spider.py 的 ProductBrief 对齐：
+    title / price / sales / id / shop / url / main_image_url / comment_count。
+    """
     data = j.get("data", {}) or {}
     arr = data.get("itemsArray", []) or []
     items = []
@@ -257,6 +272,22 @@ def parse_items(j: Dict[str, Any], limit: int = 20) -> List[Dict[str, Any]]:
         si = it.get("shopInfo") or {}
         shop = (si.get("title") or si.get("nick") or "") if isinstance(si, dict) else ""
         item_id = str(it.get("item_id", ""))
+        # 主图：与 TaobaoSpider 一致，依次尝试多个候选键
+        img = (
+            it.get("pic_path")
+            or it.get("img")
+            or it.get("image")
+            or it.get("pic_url")
+            or ""
+        )
+        # 评价数：搜索接口未必返回，依次尝试多个候选键，缺失则为空串
+        comment = str(
+            it.get("commentCount")
+            or it.get("totalEval")
+            or it.get("comment_count")
+            or it.get("feedbackNum")
+            or ""
+        )
         items.append({
             "title": it.get("title", ""),
             "price": price,
@@ -264,5 +295,7 @@ def parse_items(j: Dict[str, Any], limit: int = 20) -> List[Dict[str, Any]]:
             "id": item_id,
             "shop": shop,
             "url": f"https://item.taobao.com/item.htm?id={item_id}",
+            "main_image_url": str(img),
+            "comment_count": comment,
         })
     return items

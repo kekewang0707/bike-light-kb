@@ -22,10 +22,11 @@
     session = next(get_session())
 """
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 from config.settings import settings
+from loguru import logger
 
 # ---------------------------------------------------------------------------
 # 数据库连接 URL
@@ -33,7 +34,7 @@ from config.settings import settings
 # 格式: postgresql://用户名:密码@主机:端口/数据库名
 # 配置值来自 config/settings.py，可通过环境变量 BKL_DB_* 覆盖
 DATABASE_URL = (
-    f"postgresql://{settings.db_user}:{settings.db_password}"
+    f"postgresql://{settings.db_user}:{settings.db_password.get_secret_value()}"
     f"@{settings.db_host}:{settings.db_port}/{settings.db_name}"
 )
 
@@ -117,3 +118,18 @@ def init_db():
         init_db()
     """
     Base.metadata.create_all(bind=engine)
+    # 兼容已有库：补齐新增列（create_all 不会 ALTER 已存在的表）
+    try:
+        with engine.connect() as conn:
+            conn.execution_options(isolation_level="AUTOCOMMIT")
+            conn.execute(
+                text("ALTER TABLE products ADD COLUMN IF NOT EXISTS marketing JSONB")
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE reviews ADD COLUMN IF NOT EXISTS "
+                    "user_name_hash VARCHAR(64)"
+                )
+            )
+    except Exception as e:  # noqa: BLE001 - 列已存在等情况可忽略
+        logger.warning(f"补齐 products.marketing 列失败（若列已存在可忽略）: {e}")

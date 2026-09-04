@@ -58,7 +58,7 @@ def create_chat_model(
         配置好的 ChatOpenAI 实例。API key 未设置时返回 None。
     """
     _base_url = base_url or "https://api.deepseek.com/v1"
-    _api_key = api_key if api_key is not None else settings.deepseek_api_key
+    _api_key = api_key if api_key is not None else settings.deepseek_api_key.get_secret_value()
     _model = model or "deepseek-chat"
     _max_tokens = max_tokens if max_tokens is not None else 2000
 

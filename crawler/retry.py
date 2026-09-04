@@ -26,7 +26,7 @@ Usage::
 import asyncio
 import json
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Any, Set
 
@@ -198,7 +198,7 @@ class Checkpoint:
         data = {
             "task_id": self.task_id,
             "done_ids": sorted(self._done_ids),
-            "updated_at": datetime.now().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         with open(self.checkpoint_file, "w") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)

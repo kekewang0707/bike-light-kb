@@ -124,7 +124,7 @@ class MultimodalDescriber:
     ):
         self.llm = llm or create_chat_model(
             base_url=self.VL_BASE_URL,
-            api_key=settings.dashscope_api_key,
+            api_key=settings.dashscope_api_key.get_secret_value(),
             model=self.VL_MODEL,
             max_tokens=1000,
         )

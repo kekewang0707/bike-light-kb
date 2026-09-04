@@ -112,6 +112,15 @@ class Product(Base):
         ),
     )
 
+    # ---- 营销/榜单附加信息（从 specs 剥离，避免污染规格参数）----
+    marketing = Column(
+        JSONB,
+        comment=(
+            "商品卡附加信息：营销USP/榜单/热度/销量文案/评价摘录等，"
+            "来自搜索 itemsArray，与规格参数(specs)分开存储"
+        ),
+    )
+
     # ---- 时间戳 ----
     crawled_at = Column(
         DateTime(timezone=True),
