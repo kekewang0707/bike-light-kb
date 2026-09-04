@@ -28,6 +28,7 @@ from models import (
     ReviewAnalysis,
     ImageAnalysis,
 )
+from crawler.pii import hash_user_name
 
 
 def _utcnow():
@@ -258,7 +259,9 @@ def seed(session):
     for (product, rating, content, user, level, buy_date, review_date) in reviews_data:
         session.add(Review(
             product=product, platform_review_id=f"{product.platform_id}-r{random.randint(1000,9999)}",
-            rating=rating, content=content, user_name=user, user_level=level,
+            rating=rating, content=content,
+            # 与生产一致：明文昵称不落库，只存哈希
+            user_name_hash=hash_user_name(user), user_level=level,
             buy_date=buy_date, review_date=review_date, likes=random.randint(0, 50),
         ))
 

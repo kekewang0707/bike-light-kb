@@ -2,9 +2,17 @@
 
 import streamlit as st
 import psycopg2
-from datetime import datetime
+from datetime import datetime, timezone
+
+from loguru import logger
 
 from config.settings import settings
+
+
+def _utcnow() -> datetime:
+    """统一 UTC 时间（CLAUDE.md 约定：禁止 naive datetime）。"""
+    return datetime.now(timezone.utc)
+
 
 # ---------------------------------------------------------------------------
 # 页面配置
@@ -25,7 +33,7 @@ DB_CONFIG = {
     "port": settings.db_port,
     "dbname": settings.db_name,
     "user": settings.db_user,
-    "password": settings.db_password,
+    "password": settings.db_password.get_secret_value(),
 }
 
 
@@ -50,7 +58,9 @@ def check_db_health() -> dict:
         status["postgres"]["healthy"] = True
         status["postgres"]["message"] = "连接正常"
     except Exception as e:
-        status["postgres"]["message"] = str(e)
+        # 不再静默吞错：页面只展示摘要，完整原因进日志
+        logger.warning(f"PostgreSQL 健康检查失败: {e}")
+        status["postgres"]["message"] = f"{type(e).__name__}: {e}"
 
     # 检查 ChromaDB
     try:
@@ -63,7 +73,8 @@ def check_db_health() -> dict:
         status["chromadb"]["healthy"] = True
         status["chromadb"]["message"] = "连接正常"
     except Exception as e:
-        status["chromadb"]["message"] = str(e)
+        logger.warning(f"ChromaDB 健康检查失败: {e}")
+        status["chromadb"]["message"] = f"{type(e).__name__}: {e}"
 
     return status
 
@@ -115,8 +126,9 @@ if status["postgres"]["healthy"]:
         m1, m2, m3 = st.columns(3)
         m1.metric("商品总数", product_count)
         m2.metric("热榜条目", ranking_count)
-        m3.metric("最后更新", datetime.now().strftime("%Y-%m-%d %H:%M"))
-    except Exception:
+        m3.metric("最后更新", _utcnow().strftime("%Y-%m-%d %H:%M UTC"))
+    except Exception as e:
+        logger.warning(f"数据概览查询失败: {e}")
         st.info("数据库连接正常，等待数据导入。请先运行爬虫采集数据。")
 else:
     st.warning("请先启动 Docker 服务：`docker compose up -d`")
@@ -137,4 +149,13 @@ with c4:
     st.button("📝 内容生成", use_container_width=True, disabled=True)
 
 st.divider()
-st.caption(f"© 2026 Bike Light Knowledge Base | 启动时间: {datetime.now().isoformat(timespec='seconds')}")
+
+# ---- 合规声明 ----
+st.caption(
+    "本项目仅供个人学习研究使用，数据版权归原平台所有，禁止商用转售；"
+    "已内置 robots 遵从、限速与个人信息哈希脱敏。详见根目录 DISCLAIMER.md。"
+)
+st.caption(
+    f"© 2026 Bike Light Knowledge Base | 启动时间: "
+    f"{_utcnow().isoformat(timespec='seconds')}"
+)

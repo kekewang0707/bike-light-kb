@@ -29,16 +29,24 @@ Usage::
 import asyncio
 import time
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 
 from loguru import logger
 
+from config.settings import settings
 from crawler.base import BaseSpider
 from crawler.taobao_spider import TaobaoSpider
 from crawler.pipeline import DataPipeline
 from crawler.downloader import ImageDownloader
 from crawler.retry import Checkpoint, with_retry
 from crawler.schemas import CrawlReport
+from crawler.compliance import RateLimiter, RobotsChecker
+
+# 各平台搜索入口（用于 robots.txt 检查与限速的 URL 取样）
+PLATFORM_SEARCH_URL = {
+    "taobao": "https://main.m.taobao.com/search",
+    "pdd": "https://mobile.yangkeduo.com/search_result.html",
+}
 
 
 def _utcnow():
@@ -70,8 +78,35 @@ class CrawlerEngine:
         self.concurrency = concurrency
         self.enable_checkpoint = enable_checkpoint
 
-        # 信号量控制详情抓取并发
-        self._detail_semaphore = asyncio.Semaphore(concurrency)
+        # 信号量控制详情抓取并发（惰性创建：构造期还没有事件循环）
+        self._detail_semaphore: Optional[asyncio.Semaphore] = None
+
+        # 合规闸门：robots.txt 遵从 + 全局限速（默认开启，见 config/settings.py）
+        self._limiter = RateLimiter(
+            rate_per_minute=settings.crawler_rate_per_minute, burst=2
+        )
+        self._robots = RobotsChecker(respect=settings.crawler_respect_robots)
+
+    # ==================================================================
+    # 合规闸门
+    # ==================================================================
+
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """惰性获取并发信号量（在运行中的事件循环内创建）。"""
+        if self._detail_semaphore is None:
+            self._detail_semaphore = asyncio.Semaphore(self.concurrency)
+        return self._detail_semaphore
+
+    async def _guard(self, url: str) -> bool:
+        """请求前的合规检查：robots 允许 → 限速等待。
+
+        返回 False 表示被 robots.txt 拒绝，调用方应跳过该请求。
+        """
+        if not await self._robots.allowed(url):
+            logger.warning(f"robots.txt 禁止访问，跳过: {url}")
+            return False
+        await self._limiter.acquire()
+        return True
 
     # ==================================================================
     # 主入口
@@ -121,6 +156,8 @@ class CrawlerEngine:
 
         try:
             # ---- Phase 1: 搜索 ----
+            # 存 (spider, brief) 二元组：多平台时 Phase 2 才能找到正确的 spider，
+            # 而不是误用 Phase 1 循环结束后残留的外层 spider 变量
             all_briefs: list = []
             for spider in self.spiders:
                 try:
@@ -130,15 +167,27 @@ class CrawlerEngine:
                     report.errors.append(f"setup[{spider.platform}]: {e}")
                     continue
 
+                # 合规闸门：robots 检查 + 限速（搜索入口按平台取样）
+                search_url = PLATFORM_SEARCH_URL.get(spider.platform)
+                if search_url and not await self._guard(search_url):
+                    logger.error(
+                        f"[{spider.platform}] 被 robots.txt 拒绝，跳过该平台。"
+                        f"如你已获得授权，可设置 BKL_CRAWLER_RESPECT_ROBOTS=false"
+                    )
+                    report.errors.append(f"robots_denied[{spider.platform}]")
+                    continue
+
                 for keyword in keywords:
                     try:
+                        if not await self._guard(search_url or ""):
+                            break
                         briefs = await with_retry(
                             lambda kw=keyword: spider.search(kw, max_items=max_products_per_keyword),
                             max_retries=2,
                             base_delay=5.0,
                         )
                         report.products_found += len(briefs)
-                        all_briefs.extend(briefs)
+                        all_briefs.extend((spider, b) for b in briefs)
                         logger.info(f"搜索 '{keyword}' → {len(briefs)} 个商品")
                     except Exception as e:
                         logger.error(f"搜索失败 [{spider.platform}][{keyword}]: {e}")
@@ -148,15 +197,17 @@ class CrawlerEngine:
                 logger.warning("未搜索到任何商品，爬虫结束")
                 return report
 
-            # 断点续爬: 跳过已处理的
-            checkpoint = Checkpoint(f"crawl_{started_at.strftime('%Y%m%d_%H%M')}")
-            pending = checkpoint.skip_done(all_briefs, key_fn=lambda b: b.platform_id)
+            # 断点续爬: 跳过已处理的（task_id 按关键词稳定命名，重启后可真正续爬）
+            checkpoint = Checkpoint(f"crawl_{'_'.join(keywords)}")
+            pending = checkpoint.skip_done(
+                all_briefs, key_fn=lambda pair: pair[1].platform_id
+            )
 
             logger.info(f"Phase 1 完成: {len(pending)}/{len(all_briefs)} 个商品待处理")
 
             # ---- Phase 2: 详情 + 评价 (逐个处理) ----
-            for i, brief in enumerate(pending):
-                if hasattr(spider, '_captcha_triggered') and getattr(spider, '_captcha_triggered'):
+            for i, (spider, brief) in enumerate(pending):
+                if getattr(spider, '_captcha_triggered', False):
                     logger.warning("已触发验证码，停止后续商品的抓取")
                     report.captcha_triggered = True
                     break
@@ -174,6 +225,9 @@ class CrawlerEngine:
                 # 详情
                 detail = None
                 try:
+                    if not await self._guard(brief.product_url or ""):
+                        logger.warning(f"跳过被 robots 拒绝的商品: {brief.platform_id}")
+                        continue
                     detail = await self._fetch_detail_with_limit(spider, brief)
                 except Exception as e:
                     logger.error(f"详情抓取异常 [{brief.platform_id}]: {e}")
@@ -208,8 +262,8 @@ class CrawlerEngine:
                     # 价格快照
                     try:
                         self.pipeline.save_price_snapshot(product_id, brief.price)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"价格快照写入跳过 [{brief.platform_id}]: {e}")
 
                 # 标记已处理
                 checkpoint.mark_done(brief.platform_id)
@@ -267,5 +321,5 @@ class CrawlerEngine:
         self, spider: BaseSpider, brief
     ):
         """带并发控制的详情抓取。"""
-        async with self._detail_semaphore:
+        async with self._get_semaphore():
             return await spider.get_detail(brief)

@@ -36,6 +36,18 @@ python scripts/taobao_login.py login                 # 一次性扫码登录，�
 python scripts/taobao_login.py status                # 查看登录态 / 剩余有效期
 python scripts/taobao_login.py request -u "https://main.m.taobao.com/" -X GET   # 带 Cookie 的普通请求
 python scripts/taobao_login.py search -q "自行车灯" -p 1                          # 带签名调用 mtop 搜索接口
+
+# 测试（pytest + pytest-asyncio，asyncio_mode=auto）
+venv/bin/python -m pytest                              # 全量
+venv/bin/python -m pytest tests/test_pii.py -v         # 单个模块
+
+# 依赖锁定
+venv/bin/python scripts/gen_requirements_lock.py       # 生成 requirements.lock.txt 并校验
+venv/bin/python scripts/gen_requirements_lock.py --check   # CI 用：只校验 lock 是否过期
+
+# PII 保留期清理（建议每周一次，可挂 cron）
+venv/bin/python scripts/anonymize_pii.py --dry-run     # 预览将被匿名化的行数
+venv/bin/python scripts/anonymize_pii.py --days 365    # 正式执行
 ```
 
 ## 架构
@@ -133,3 +145,8 @@ Pydantic Settings，环境变量前缀 `BKL_`，从 `.env` 文件读取。关键
 - **日志**：全项目统一使用 `loguru`（非标准库 `logging`）
 - **数据校验**：`crawler/pipeline.py` 中的 `DataValidator` 负责入库前校验 — 商品（价格范围、平台白名单、标题长度）、评价（评分 1-5、内容长度）
 - **去重策略**：商品按 `(platform, platform_id)` 去重，评价按 `platform_review_id` 去重
+- **计划偏差基准**：`功能实施计划.md` / `plans/*.md` 是历史决策留痕；当实现与之不一致时，**以 `docs/design-deviations.md` 为准**（含 `parser.py`、`proxy_pool.py`、`spec_normalizer.py` 的取舍理由）
+- **合规底线（不可绕过）**：
+  - 所有对外请求必须过 `CrawlerEngine._guard()`（robots 检查 + 令牌桶限速），新增蜘蛛也不例外
+  - 用户昵称等个人信息**禁止明文入库**，统一走 `crawler/pii.py::hash_user_name()` 写 `user_name_hash`
+  - 详见根目录 `DISCLAIMER.md`；相关开关集中在 `config/settings.py` 的「隐私 / 合规」段

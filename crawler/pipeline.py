@@ -30,13 +30,30 @@ from models import (
     Review,
     ReviewImage,
     PriceHistory,
+    HotRanking,
     CRUDBase,
 )
+from crawler.pii import hash_user_name
 from crawler.schemas import ProductBrief, ProductDetail, ReviewData, ImageTask
 
 
 def _utcnow():
     return datetime.now(timezone.utc)
+
+
+def build_hot_ranking_fields(product_id: int, rank: dict, fetched_at) -> dict:
+    """从商品卡榜单字段构造 HotRanking 记录字段（纯函数，便于测试）。
+
+    rank 来自 _parse_card_fields 的结果:
+        {"text": 榜单文案, "url": 跳转链接, "no": 名次(int), "rank_type": 平台类型}
+    """
+    return {
+        "product_id": product_id,
+        "ranking": int(rank.get("no")),
+        "list_name": str(rank.get("text", "")),
+        "period_type": "daily",   # 搜索榜单为每日快照
+        "fetched_at": fetched_at,
+    }
 
 
 class DataValidator:
@@ -75,8 +92,9 @@ class DataValidator:
                 gr = Decimal(str(good_rate))
                 if gr < 0 or gr > 100:
                     return False, f"好评率超出 0-100: {gr}"
-            except Exception:
-                pass  # 无法解析则跳过校验
+            except Exception as e:
+                # 好评率不是必填项，无法解析时跳过校验但不静默
+                logger.debug(f"好评率无法解析，跳过该项校验 [{good_rate!r}]: {e}")
 
         # platform 必须是已知平台
         platform = data.get("platform", "")
@@ -112,6 +130,7 @@ class DataPipeline:
         self.review_crud = CRUDBase(Review)
         self.review_image_crud = CRUDBase(ReviewImage)
         self.price_crud = CRUDBase(PriceHistory)
+        self.ranking_crud = CRUDBase(HotRanking)
         self.validator = DataValidator()
         self._image_tasks: List[ImageTask] = []
         self._stats = {"new": 0, "updated": 0, "skipped": 0}
@@ -154,6 +173,16 @@ class DataPipeline:
                 "crawled_at": _utcnow(),
             }
 
+            # 商品卡附加字段（营销/榜单/热度/评价摘录）：写入独立 marketing 列，不污染 specs
+            # 注意：榜单(rank)单独提升到 hot_rankings 表，不放在 marketing 里
+            if brief.original_price:
+                product_data["original_price"] = brief.original_price
+            marketing = {
+                k: v for k, v in (brief.card_extra or {}).items()
+                if k != "rank" and v not in (None, "", [], {}, False)
+            }
+            specs = {}
+
             # 合并详情页数据
             if detail:
                 if detail.brand:
@@ -161,9 +190,16 @@ class DataPipeline:
                 if detail.category:
                     product_data["category"] = detail.category
                 if detail.specs:
-                    product_data["specs"] = detail.specs
+                    specs.update(detail.specs)   # 仅规格参数
                 if detail.original_price:
                     product_data["original_price"] = detail.original_price
+                if detail.marketing:
+                    marketing.update(detail.marketing)
+
+            if specs:
+                product_data["specs"] = specs
+            if marketing:
+                product_data["marketing"] = marketing
 
             # 校验
             ok, msg = self.validator.validate_product(product_data)
@@ -195,6 +231,13 @@ class DataPipeline:
                 is_new = True
                 self._stats["new"] += 1
 
+            # 榜单数据从 marketing 提升为 hot_rankings 表记录（热榜排行页直接查）
+            rank = (brief.card_extra or {}).get("rank")
+            if not rank and detail:
+                rank = (detail.marketing or {}).get("rank")
+            if rank and rank.get("no") is not None:
+                self._save_ranking(session, product_id, rank)
+
             # 保存详情图的下载任务
             if detail and detail.detail_images:
                 for i, img_url in enumerate(detail.detail_images):
@@ -225,6 +268,22 @@ class DataPipeline:
             raise
         finally:
             session.close()
+
+    # ==================================================================
+    # 热榜入库
+    # ==================================================================
+
+    def _save_ranking(self, session, product_id: int, rank: dict) -> None:
+        """将商品卡榜单信息写入 hot_rankings 表。
+
+        榜单是时间序列快照，每次抓取都插入一条，便于趋势分析。
+        """
+        fields = build_hot_ranking_fields(product_id, rank, _utcnow())
+        self.ranking_crud.create(session, **fields)
+        logger.debug(
+            f"已写入热榜记录: product_id={product_id} "
+            f"{fields['list_name']} 第{fields['ranking']}名"
+        )
 
     # ==================================================================
     # 评价入库
@@ -278,7 +337,8 @@ class DataPipeline:
                     platform_review_id=review_data.platform_review_id,
                     rating=review_data.rating,
                     content=review_data.content,
-                    user_name=review_data.user_name,
+                    # PII：明文昵称不落库，只存 pepper 盐值哈希（用于同用户去重）
+                    user_name_hash=hash_user_name(review_data.user_name),
                     user_level=review_data.user_level,
                     review_date=review_data.review_date,
                     buy_date=review_data.buy_date,
@@ -338,7 +398,8 @@ class DataPipeline:
                     snapshot_date=today,
                 )
         except Exception as e:
-            session.rollback()
+            # 注意：CRUD 内部已 commit，此处 rollback 回滚不了已提交的行，
+            # 保留它只会误导读者以为失败可以撤销 —— 价格快照失败不阻断主流程，仅记录
             logger.error(f"保存价格快照失败 [product_id={product_id}]: {e}")
         finally:
             session.close()
