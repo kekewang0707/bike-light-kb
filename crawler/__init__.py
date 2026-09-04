@@ -31,7 +31,6 @@
 from crawler.schemas import (
     ProductBrief,
     ProductDetail,
-    SkuData,
     ReviewData,
     ImageTask,
     CrawlReport,
@@ -70,7 +69,6 @@ __all__ = [
     # 数据结构
     "ProductBrief",
     "ProductDetail",
-    "SkuData",
     "ReviewData",
     "ImageTask",
     "CrawlReport",

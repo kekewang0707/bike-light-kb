@@ -16,7 +16,7 @@ import json
 import random
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import List, Optional
@@ -155,13 +155,27 @@ class TaobaoSpider(BaseSpider):
         # 注册 API 拦截器
         self._search_api_responses = []
 
+        # 风控/验证码页面常见标记
+        captcha_markers = (
+            "验证码", "slider", "nc_wrapper", "passguard",
+            "滑动验证", "安全验证", "ufb", "human",
+        )
+
         async def _on_response(resp):
-            if resp.status == 200 and self.SEARCH_API_PATTERN in resp.url:
-                try:
+            try:
+                if resp.status != 200:
+                    return
+                if self.SEARCH_API_PATTERN in resp.url:
                     body = await resp.text()
                     self._search_api_responses.append(body)
-                except Exception:
-                    pass
+                elif "main.m.taobao.com/search" in resp.url:
+                    # 搜索页本身（非 API）若返回验证页，说明已被风控拦截
+                    text = await resp.text()
+                    if any(m in text for m in captcha_markers):
+                        self._captcha_triggered = True
+                        logger.warning("检测到验证码/风控页面，将停止后续抓取")
+            except Exception as e:
+                logger.debug(f"搜索响应拦截处理异常（已忽略）: {e}")
 
         self._page.on("response", _on_response)
 
@@ -192,13 +206,20 @@ class TaobaoSpider(BaseSpider):
                     continue
                 seen_ids.add(item_id)
 
+                card = self._parse_card_fields(item)
                 name = item.get("title") or item.get("name") or ""
-                price_str = item.get("price") or item.get("view_price") or "0"
-                price = self._parse_price(price_str)
-                sales = self._parse_int(str(item.get("sold") or item.get("sales") or "0"))
-                img = item.get("pic_path") or item.get("img") or item.get("image") or ""
-                shop = item.get("shop") or item.get("nick") or item.get("seller_nick") or ""
-
+                # 价格：首单价(到手价)优先于裸 price 原价
+                price = card["price"] or self._parse_price(
+                    item.get("price") or item.get("view_price") or "0"
+                )
+                img = (
+                    item.get("pic_path") or item.get("img")
+                    or item.get("image") or item.get("pic_url") or ""
+                )
+                shop = (
+                    item.get("shop") or item.get("nick")
+                    or item.get("seller_nick") or ""
+                )
                 platform = "tmall" if item.get("is_tmall") or item.get("shop_type") == "tmall" else "taobao"
 
                 if name and price > 0:
@@ -207,11 +228,23 @@ class TaobaoSpider(BaseSpider):
                         platform_id=item_id,
                         name=str(name)[:500],
                         price=Decimal(str(price)),
+                        original_price=(
+                            Decimal(str(card["original_price"]))
+                            if card["original_price"] else None
+                        ),
                         shop_name=str(shop),
                         main_image_url=str(img),
-                        sales_volume=sales,
-                        comment_count=0,
+                        sales_volume=card["sales_volume"],
+                        comment_count=card["comment_count"],
                         product_url=f"https://item.taobao.com/item.htm?id={item_id}",
+                        card_extra={
+                            "sales_text": card["sales_text"],
+                            "comment_snippet": card["comment_snippet"],
+                            "rank": card["rank"],
+                            "popularity_text": card["popularity_text"],
+                            "marketing_usp": card["marketing_usp"],
+                            "shop_discount": card["shop_discount"],
+                        },
                     ))
 
         logger.info(f"搜索完成: {len(results)} 个商品")
@@ -326,8 +359,11 @@ class TaobaoSpider(BaseSpider):
                         rating=int(r.get("rate", 5)),
                         content=r.get("rateContent", ""),
                         user_name=r.get("displayUserNick", ""),
-                        review_date=datetime.fromisoformat(r.get("rateDate", ""))
-                            if r.get("rateDate") else None,
+                        review_date=(
+                            datetime.fromisoformat(r.get("rateDate", ""))
+                            .replace(tzinfo=timezone.utc)
+                            if r.get("rateDate") else None
+                        ),
                         images=[img.get("url", "") for img in r.get("pics", [])],
                         likes=int(r.get("useful", 0)),
                     ))
@@ -429,6 +465,147 @@ class TaobaoSpider(BaseSpider):
     # 内部 — 解析
     # ==================================================================
 
+    @staticmethod
+    def _extract_rank_no(text: str):
+        """从榜单文案中提取名次，如 '自行车灯热销榜·第2名' → 2。"""
+        idx_d = (text or "").find("第")
+        idx_m = (text or "").find("名", idx_d) if idx_d != -1 else -1
+        if idx_d == -1 or idx_m == -1:
+            return None
+        digits = "".join(ch for ch in text[idx_d:idx_m] if ch.isdigit())
+        return int(digits) if digits else None
+
+    @staticmethod
+    def _first_json_object(text: str):
+        """在文本中定位并解析第一个平衡的大括号 JSON 对象。"""
+        BACKSLASH = chr(92)
+        QUOTE = chr(34)
+        start = text.find("{")
+        while start != -1:
+            depth = 0
+            in_str = False
+            esc = False
+            for i in range(start, len(text)):
+                c = text[i]
+                if in_str:
+                    if esc:
+                        esc = False
+                    elif c == BACKSLASH:
+                        esc = True
+                    elif c == QUOTE:
+                        in_str = False
+                    continue
+                if c == QUOTE:
+                    in_str = True
+                elif c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(text[start:i + 1])
+                        except json.JSONDecodeError:
+                            break
+            start = text.find("{", start + 1)
+        return None
+
+    @staticmethod
+    def _extract_embedded_card_json(html: str):
+        """从详情页 HTML 的 <script> 中提取含商品卡字段的 JSON 对象。
+
+        淘宝详情页会把部分卡片数据内联进脚本，对应
+        references/taobao_product_detail_fields.md 的字段。
+        """
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+        markers = ("priceShowWithIcon", "realSales", "iconUspSortInfo", "specialUSPInfo")
+        for script in soup.find_all("script"):
+            txt = script.string or script.get_text() or ""
+            if not any(m in txt for m in markers):
+                continue
+            obj = TaobaoSpider._first_json_object(txt)
+            if obj and isinstance(obj, dict) and any(k in obj for k in markers):
+                return obj
+        return None
+
+    @staticmethod
+    def _parse_card_fields(raw: dict) -> dict:
+        """从商品卡原始 JSON（搜索/推荐流 itemsArray 单条）提取营销与展示字段。
+
+        对应 references/taobao_product_detail_fields.md：
+        - priceShowWithIcon.price              → 到手价(首单价)
+        - priceShowWithIcon.originPrice/price  → 原价(划线价)
+        - realSales                            → 销量文案 + 销量数字
+        - iconUspSortInfo.numericalCommentInfo  → 评价数 + 评价摘录
+        - iconUspSortInfo.tmRankInfo           → 热销榜(名称/名次/跳转)
+        - iconUspSortInfo.extend_source        → 人气热度文案
+        - specialUSPInfo / shopDiscountInfo    → 营销利益点(USP)
+        """
+        raw = raw or {}
+        # ---- 价格 ----
+        psi = raw.get("priceShowWithIcon") or {}
+        price = TaobaoSpider._parse_price(psi.get("price") or raw.get("price") or "0")
+        orig_raw = psi.get("originPrice")  # 无划线价保持 None，不回退到当前价
+        original_price = TaobaoSpider._parse_price(orig_raw) if orig_raw else None
+        # ---- 销量 ----
+        raw_sales = raw.get("realSales") or raw.get("sold") or raw.get("sales") or ""
+        sales_volume = TaobaoSpider._parse_int(str(raw_sales))
+        # ---- 评价 / 榜单 / 热度 ----
+        rank = None
+        popularity_text = ""
+        comment_snippet = ""
+        comment_count = 0
+        for usp in (raw.get("iconUspSortInfo") or []):
+            if not isinstance(usp, dict):
+                continue
+            code = usp.get("usp_code", "")
+            text = usp.get("text", "") or ""
+            if code == "numericalCommentInfo":
+                comment_count = TaobaoSpider._parse_int(text)
+                ci = text.find("评价")
+                if ci != -1:
+                    rest = text[ci + 2:].lstrip("“\"'")
+                    end = len(rest)
+                    for j, ch in enumerate(rest):
+                        if ch in ("”", '"', "'", "，"):
+                            end = j
+                            break
+                    comment_snippet = rest[:end].strip()
+            elif code == "tmRankInfo":
+                rank = {
+                    "text": text,
+                    "url": usp.get("url", ""),
+                    "no": TaobaoSpider._extract_rank_no(text),
+                    "rank_type": usp.get("rankType", ""),
+                }
+            elif code == "extend_source":
+                popularity_text = text
+        # ---- 营销 USP ----
+        marketing_usp = [
+            {
+                "code": u.get("usp_code", ""),
+                "text": u.get("text", ""),
+                "icon": u.get("icon", ""),
+            }
+            for u in (raw.get("specialUSPInfo") or [])
+            if isinstance(u, dict)
+        ]
+        shop_discount = raw.get("shopDiscountInfo") or (
+            marketing_usp[0]["text"] if marketing_usp else ""
+        )
+        return {
+            "price": price,
+            "original_price": original_price,
+            "sales_volume": sales_volume,
+            "sales_text": str(raw_sales),
+            "comment_count": comment_count,
+            "comment_snippet": comment_snippet,
+            "rank": rank,
+            "popularity_text": popularity_text,
+            "marketing_usp": marketing_usp,
+            "shop_discount": shop_discount,
+        }
+
     def _parse_detail_html(self, html: str, platform_id: str) -> ProductDetail:
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(html, "html.parser")
@@ -452,9 +629,31 @@ class TaobaoSpider(BaseSpider):
             if src.startswith("http"):
                 detail_images.append(src)
 
+        # 从详情页内联脚本提取商品卡字段（首单价/原价/榜单/热度/营销USP）
+        # 注意：这些字段写入独立的 marketing 列，不污染 specs（规格参数）
+        # 榜单(rank)单独提升到 hot_rankings 表，不放在 marketing 里
+        original_price = None
+        marketing = {}
+        card_raw = self._extract_embedded_card_json(html)
+        if card_raw:
+            card = self._parse_card_fields(card_raw)
+            if card["original_price"]:
+                original_price = Decimal(str(card["original_price"]))
+            for k, v in {
+                "sales_text": card["sales_text"],
+                "comment_snippet": card["comment_snippet"],
+                "popularity_text": card["popularity_text"],
+                "marketing_usp": card["marketing_usp"],
+                "shop_discount": card["shop_discount"],
+            }.items():
+                if v not in (None, "", [], {}, False):
+                    marketing[k] = v
+
         return ProductDetail(
             platform_id=platform_id, brand=brand,
             specs=specs, detail_images=detail_images,
+            original_price=original_price,
+            marketing=marketing,
         )
 
     # ==================================================================

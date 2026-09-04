@@ -27,28 +27,20 @@ class ProductBrief:
     platform: str               # taobao / pdd
     platform_id: str            # 平台侧商品唯一ID
     name: str                   # 商品标题（原始文案）
-    price: Decimal              # 当前售价（元）
+    price: Decimal              # 当前售价（元），优先取 priceShowWithIcon.price 首单价
     shop_name: str              # 店铺名称
     main_image_url: str         # 商品主图 URL
     sales_volume: int           # 累计销量（平台展示值，非精确值）
     comment_count: int          # 评价总数
     good_rate: Optional[Decimal] = None   # 好评率(%)，如 97.00
     product_url: str = ""       # 商品详情页链接
+    original_price: Optional[Decimal] = None   # 原价/划线价（元），如 419.00
+    card_extra: dict = field(default_factory=dict)  # 商品卡附加信息（销量文案/榜单/热度/营销USP/评价摘录）
 
 
 # ============================================================================
 # 详情页 → 完整商品信息
 # ============================================================================
-
-@dataclass
-class SkuData:
-    """单个 SKU 规格数据。"""
-
-    sku_name: str               # SKU 名称，如 "黑色-800流明-续航8小时"
-    price: Decimal              # 该 SKU 的售价
-    stock: int = 0              # 库存（平台展示值）
-    sku_specs: dict = field(default_factory=dict)  # {"颜色":"黑色","流明":800}
-
 
 @dataclass
 class ProductDetail:
@@ -62,9 +54,9 @@ class ProductDetail:
     brand: Optional[str] = None
     category: Optional[str] = None
     specs: dict = field(default_factory=dict)   # {"流明":800,"防水":"IPX6",...}
-    skus: List[SkuData] = field(default_factory=list)
     detail_images: List[str] = field(default_factory=list)  # 详情图 URL 列表
     original_price: Optional[Decimal] = None
+    marketing: dict = field(default_factory=dict)  # 商品卡营销/榜单/热度附加信息(从specs剥离)
 
 
 # ============================================================================
@@ -78,7 +70,7 @@ class ReviewData:
     platform_review_id: str     # 平台侧评价唯一ID
     rating: int                 # 星级 1-5
     content: str                # 评价原文
-    user_name: str              # 用户昵称（平台已脱敏）
+    user_name: str              # 用户昵称（仅内存中使用，入库前哈希化，明文不落库）
     user_level: Optional[str] = None    # 用户等级: plus会员 / 普通用户
     review_date: Optional[datetime] = None
     buy_date: Optional[datetime] = None
