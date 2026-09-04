@@ -1,43 +1,57 @@
-# Web Scraping
-playwright>=1.45.0
+# 自行车灯电商知识库 — 依赖清单
+#
+# 约定：
+#   1. 所有依赖都带上下限（>=最低验证版本,<下一个不兼容大版本），避免无上限 `>=`
+#   2. 精确版本见 requirements.lock.txt（由 venv 实测生成），生产部署请用 lock
+#   3. 安装：pip install -r requirements.lock.txt
+#
+# 重新生成 lock：
+#   python -m venv venv && venv/bin/pip install -r requirements.txt
+#   venv/bin/pip freeze --exclude-editable | grep -vE '^(pip|setuptools|wheel)=' > requirements.lock.txt
 
-# Database
-psycopg2-binary>=2.9.9
-sqlalchemy>=2.0.30
+# ---- Web Scraping ----
+playwright>=1.45.0,<2.0.0
+curl-cffi>=0.7.0,<1.0.0           # mtop 接口伪装 Chrome TLS 指纹（淘宝反爬，见 DISCLAIMER.md）
 
-# Vector Database
-chromadb>=0.5.0
-chromadb-client>=0.5.0
+# ---- Database ----
+psycopg2-binary>=2.9.9,<3.0.0
+sqlalchemy>=2.0.30,<3.0.0
 
-# Web Framework
-streamlit>=1.35.0
+# ---- Vector Database ----
+chromadb>=0.5.0,<2.0.0
 
-# Data Processing
-pandas>=2.2.0
-numpy>=1.26.0
+# ---- Web Framework ----
+streamlit>=1.35.0,<2.0.0
 
-# Configuration
-python-dotenv>=1.0.1
-pydantic>=2.7.0
-pydantic-settings>=2.3.0
+# ---- Data Processing ----
+pandas>=2.2.0,<4.0.0
+numpy>=1.26.0,<3.0.0
 
-# LLM / LangChain
+# ---- Configuration ----
+python-dotenv>=1.0.1,<2.0.0
+pydantic>=2.7.0,<3.0.0
+pydantic-settings>=2.3.0,<3.0.0
+
+# ---- LLM / LangChain ----
 langchain-core>=0.3.0,<0.4.0
 langchain-openai>=0.2.0,<0.3.0
 openai>=1.30.0,<2.0.0
 
-# Utilities
-httpx>=0.27.0
-loguru>=0.7.2
-curl-cffi>=0.7.0                 # mtop 接口伪装 Chrome TLS 指纹（淘宝反爬）
+# ---- Utilities ----
+httpx>=0.27.0,<1.0.0
+loguru>=0.7.2,<0.8.0
 
-# M4 — 图片分析
-easyocr>=1.7.0                        # OCR 文字提取（PaddleOCR 可选）
-transformers>=4.40.0                   # CLIP 模型
-Pillow>=10.0.0                         # 图片加载（CLIP 预处理）
-scikit-learn>=1.4.0                    # K-Means 聚类
+# ---- M4 图片分析 ----
+easyocr>=1.7.0,<2.0.0             # OCR 文字提取
+transformers>=4.40.0,<6.0.0       # CLIP 模型
+Pillow>=10.0.0,<13.0.0            # 图片加载（CLIP 预处理）
+scikit-learn>=1.4.0,<2.0.0        # K-Means 聚类
 
+# ---- 看板 / 导出 ----
 altair~=6.2.2
 beautifulsoup4~=4.15.0
 openpyxl~=3.1.5
-selenium~=4.46.0
+
+# ---- Testing ----
+pytest>=8.0.0,<10.0.0
+pytest-asyncio>=0.23.0,<2.0.0
